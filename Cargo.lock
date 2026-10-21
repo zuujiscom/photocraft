@@ -1250,6 +1250,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-web-recovery"
+version = "0.1.0"
+source = "git+https://github.com/zuujiscom/craft-libs?branch=web-recovery#ffba040ead6344dec4f7a7434a29b6eb3e05146c"
+dependencies = [
+ "js-sys",
+ "log",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "craft-winprint-gdi"
 version = "0.1.0"
 source = "git+https://github.com/storytold/winprint.rs?rev=417ac3c4d14d3da5485a99c7d5ce8f05664ec312#417ac3c4d14d3da5485a99c7d5ce8f05664ec312"
@@ -5095,6 +5107,7 @@ dependencies = [
 name = "photocraft-web"
 version = "0.11.1"
 dependencies = [
+ "craft-web-recovery",
  "eframe",
  "egui",
  "js-sys",
@@ -5102,6 +5115,7 @@ dependencies = [
  "photocraft-codecs",
  "photocraft-doc",
  "photocraft-engine",
+ "photocraft-format",
  "photocraft-io",
  "photocraft-paint",
  "photocraft-psd",

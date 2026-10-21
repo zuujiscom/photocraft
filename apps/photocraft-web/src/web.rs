@@ -73,6 +73,9 @@ pub fn start() {
                 (None, bridge, Vec::new())
             }
         };
+        // Read crash-recovery entries now, so the app can offer them at launch (#6615).
+        let recovery = crate::indexed_recovery::load().await;
+        let mut recovery = Some(recovery);
         let pen_target = canvas.clone();
         let result = eframe::WebRunner::new()
             .start(
@@ -87,7 +90,15 @@ pub fn start() {
                     let (session, warnings) = crate::preset_bridge::session(presets.clone());
                     preset_warnings.extend(warnings);
                     let drag = listen_drag(&pen_target);
-                    let mut app = PhotocraftApp::new(session, services(inbox.clone(), place_inbox.clone(), drag_pos_service(pen_target.clone(), drag)));
+                    let mut services = services(inbox.clone(), place_inbox.clone(), drag_pos_service(pen_target.clone(), drag));
+                    let recovery_warnings = match recovery.take() {
+                        Some(r) => crate::indexed_recovery::install(&mut services, r, &cc.egui_ctx),
+                        None => Vec::new(),
+                    };
+                    let mut app = PhotocraftApp::new(session, services);
+                    if !recovery_warnings.is_empty() {
+                        photocraft_ui_egui::notices::post(&mut app, i18n::t("Crash recovery"), recovery_warnings, true, None);
+                    }
                     if !preset_warnings.is_empty() {
                         photocraft_ui_egui::notices::post(&mut app, i18n::t("Some brush presets could not be loaded"), preset_warnings, true, None);
                     }
