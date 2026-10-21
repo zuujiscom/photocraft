@@ -28,7 +28,10 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
         gpu.set_style(style);
         app.prefs_rt.gpu_style = Some(style);
     }
-    autosave(app);
+    if let Some(wait) = autosave(app) {
+        // An idle page draws no frames: wake up when the next autosave is due (#6615).
+        ctx.request_repaint_after(std::time::Duration::try_from_secs_f64(wait / 1000.0).unwrap_or_default());
+    }
     #[cfg(not(target_arch = "wasm32"))]
     link_updates(app, ctx);
     history_log(app);
@@ -224,13 +227,12 @@ fn link_updates(app: &mut PhotocraftApp, ctx: &egui::Context) {
     ctx.request_repaint_after(std::time::Duration::from_millis(wait));
 }
 
-/// Background autosave of documents with unsaved changes every N minutes (File Handling).
-fn autosave(app: &mut PhotocraftApp) {
+/// Background autosave of documents with unsaved changes every N minutes (File Handling). Returns
+/// how long until the next autosave is due, in milliseconds, while one is scheduled.
+fn autosave(app: &mut PhotocraftApp) -> Option<f64> {
     let fh = &app.session.prefs().file_handling;
     let (on, minutes) = (fh.autosave, fh.autosave_minutes.max(1));
-    if app.services.autosave.is_none() {
-        return;
-    }
+    app.services.autosave.as_ref()?;
     // A successful queue operation is not a successful disk write. Poll each frame,
     // including frames before the next autosave interval, so failures are visible.
     if let Some(results) = app.services.autosave_results.as_mut() {
@@ -265,15 +267,15 @@ fn autosave(app: &mut PhotocraftApp) {
         }
     }
     if !on {
-        return;
+        return None;
     }
     let interval = minutes as f64 * 60_000.0;
     if app.prefs_rt.next_autosave_ms == 0.0 || app.prefs_rt.next_autosave_ms > now + interval {
         app.prefs_rt.next_autosave_ms = now + interval;
-        return;
+        return Some(interval);
     }
     if now < app.prefs_rt.next_autosave_ms {
-        return;
+        return Some(app.prefs_rt.next_autosave_ms - now);
     }
     app.prefs_rt.next_autosave_ms = now + interval;
     let jobs: Vec<_> = app
@@ -302,6 +304,7 @@ fn autosave(app: &mut PhotocraftApp) {
             }
         }
     }
+    Some(interval)
 }
 
 /// Force the autosave timer to fire on the next tick (tests, `prefs` changes).

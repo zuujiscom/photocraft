@@ -9,6 +9,7 @@
 //! - file pickers return browser file contents asynchronously through `Services::file_dialog`;
 //!   this includes File → Open and commands such as Place Embedded;
 //! - saving/exporting triggers a browser download;
+//! - crash-recovery autosaves (Preferences › File Handling) go to IndexedDB (`indexed_recovery`);
 //! - dropped files are read asynchronously by `web::WebShell` and delivered through `Services::inbox`.
 //!
 //! URL query flags: `?cpu` forces the CPU canvas path (same as `PHOTOCRAFT_CPU_CANVAS=1`);
@@ -21,6 +22,9 @@ mod preset_bridge;
 
 #[cfg(target_arch = "wasm32")]
 mod indexed_presets;
+
+#[cfg(target_arch = "wasm32")]
+mod indexed_recovery;
 
 #[cfg(target_arch = "wasm32")]
 mod web;
