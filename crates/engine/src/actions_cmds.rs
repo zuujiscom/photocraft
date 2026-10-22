@@ -22,6 +22,8 @@ use serde_json::{Value, json};
 use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
 
+mod json_file;
+
 fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: cmd.into(), msg: msg.into() }
 }
@@ -636,6 +638,26 @@ fn set_color(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
+        CommandSpec {
+            id: "actions.import",
+            label: "Load Actions…",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"data":str} → {imported, skipped, actions:[names]}. Append version 1 Actions JSON, retarget nested calls, and rename conflicts; unchanged reimports do nothing."##,
+            enabled: always,
+            run: json_file::import,
+            journal: false,
+        },
+        CommandSpec {
+            id: "actions.export",
+            label: "Save Actions…",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"path":str?} → {count, bytes, data?:JSON string, path?}. Export version 1 Actions JSON, preserving disabled steps, dialog toggles and sets."##,
+            enabled: always,
+            run: json_file::export,
+            journal: false,
+        },
         CommandSpec {
             id: "actions.move",
             label: "Move Action or Step",
