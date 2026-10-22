@@ -1107,6 +1107,30 @@ fn save_asks_before_replacing_a_file_another_app_changed() {
 }
 
 #[test]
+fn save_in_place_of_a_flat_file_asks_first_when_another_app_changed_it() {
+    let ctx = egui::Context::default();
+    let path = "/pics/My image.jpg";
+    let (mut app, open, written) = jpeg_app(None, false);
+    let disk = on_disk(&mut app);
+    changed_by_another_app(&disk, path);
+    app.opened_from(path);
+    app.run("image.adjustments.invert", json!({})).unwrap();
+    changed_by_another_app(&disk, path);
+    // One plain Background layer: the JPEG keeps it, so Save writes back without a dialog (#5733)
+    // but asks before replacing the changed file (#6596).
+    let r = menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
+    assert_eq!(r["confirmationPending"], true, "{r}");
+    app.poll_file_dialog(&ctx, None);
+    assert!(open.borrow().is_empty(), "no Save dialog");
+    assert!(written.borrow().is_empty(), "the changed file is not replaced before the answer");
+    let id = disk_prompt(&app).expect("Save asks first").id;
+    crate::dialogs::confirm(&mut app, id).unwrap();
+    assert_eq!(*written.borrow(), [path]);
+    assert!(!app.session.active().unwrap().is_dirty());
+    assert_eq!(app.session.journal.last().map(|s| s.0.as_str()), Some("file.save"), "recorded as a plain Save");
+}
+
+#[test]
 fn save_of_a_flat_file_asks_after_the_dialog_when_another_app_changed_it() {
     let ctx = egui::Context::default();
     // Lowercase: the Save dialog lowercases a typed extension by default.
@@ -1115,6 +1139,8 @@ fn save_of_a_flat_file_asks_after_the_dialog_when_another_app_changed_it() {
     let disk = on_disk(&mut app);
     changed_by_another_app(&disk, path);
     app.opened_from(path);
+    // Not the Background any more, and JPEG has no alpha: Save goes through the dialog.
+    app.run("layer.new.layerFromBackground", json!({})).unwrap();
     app.run("image.adjustments.invert", json!({})).unwrap();
     changed_by_another_app(&disk, path);
     menus::invoke(&mut app, &ctx, "file.save", json!({})).unwrap();
