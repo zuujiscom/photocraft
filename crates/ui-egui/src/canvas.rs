@@ -230,6 +230,28 @@ impl Drag {
 /// style (fixed ratio / fixed size), ⇧ for a square or circle, ⌥ to draw from the centre.
 pub fn marquee_corners(o: &crate::state::ToolOptions, d: &Drag, end: [f64; 2]) -> ([f64; 2], [f64; 2]) {
     let (shift, alt) = d.marquee_mods();
+    if o.marquee_style == "fixedSize" {
+        // A fixed size is that many pixels exactly: the corners land on the pixel grid, from the
+        // pressed pixel towards the drag (⌥: centred on the press), so the floor and ceil of
+        // `marquee_px` add nothing. From the fractional press point itself, `start + size`
+        // spanned a pixel more each way (#6015). The pressed pixel is `s.floor()`, also when the
+        // press lands exactly on a grid line, so a reverse drag ends at the pixel after it.
+        let size = [f64::from(o.marquee_width).max(1.0).round(), f64::from(o.marquee_height).max(1.0).round()];
+        let (mut a, mut b) = ([0.0; 2], [0.0; 2]);
+        for i in 0..2 {
+            let (s, n) = (d.start[i], size[i]);
+            a[i] = if alt {
+                // round half up, so a press at 0 with an odd size keeps its own pixel
+                (s - n / 2.0 + 0.5).floor()
+            } else if end[i] < s {
+                s.floor() + 1.0 - n
+            } else {
+                s.floor()
+            };
+            b[i] = a[i] + n;
+        }
+        return (a, b);
+    }
     let e = crate::chrome_ui::marquee_end(&o.marquee_style, o.marquee_width as f64, o.marquee_height as f64, shift, d.start, end);
     if !alt {
         return (d.start, e);
@@ -9068,3 +9090,47 @@ mod display_memo_tests;
 #[cfg(test)]
 #[path = "canvas/blend_viewport_tests.rs"]
 mod blend_viewport_regression;
+
+#[cfg(test)]
+mod marquee_size_tests {
+    use super::*;
+    use crate::state::ToolOptions;
+
+    /// #6015: Style: Fixed Size selects exactly that many pixels, from the pressed pixel towards
+    /// the drag or (⌥ during the drag) centred on the press, wherever inside the pixel the press
+    /// landed. The corners used to be `start + size` from the fractional press point, which
+    /// `marquee_px` floored and ceiled to a pixel more each way: 1 × 1 selected 2 × 2.
+    #[test]
+    fn a_fixed_size_marquee_is_exactly_that_size() {
+        let mut o = ToolOptions { marquee_style: "fixedSize".into(), ..Default::default() };
+        let drag_at = |start: [f64; 2], alt: bool| {
+            let mut d = Drag::new(Tool::RectMarquee, start, vec![], egui::Modifiers::NONE, false);
+            d.live.alt = alt; // ⌥ pressed during the drag centres it (held at the press it subtracts)
+            d
+        };
+        let drag = |alt: bool| drag_at([10.4, 20.6], alt);
+        let px = |o: &ToolOptions, d: &Drag, end: [f64; 2]| {
+            let (a, b) = marquee_corners(o, d, end);
+            marquee_px(a, b)
+        };
+        for (w, h) in [(1.0f32, 1.0f32), (10.0, 10.0), (64.0, 32.0)] {
+            (o.marquee_width, o.marquee_height) = (w, h);
+            let (w, h) = (f64::from(w), f64::from(h));
+            // inside pixel (10, 20), and exactly on its top-left grid line: the same pixel
+            for start in [[10.4, 20.6], [10.0, 20.0]] {
+                let d = drag_at(start, false);
+                assert_eq!(px(&o, &d, [30.0, 40.0]), [10.0, 20.0, 10.0 + w, 20.0 + h], "{w}×{h} from the pressed pixel {start:?}");
+                assert_eq!(px(&o, &d, start), [10.0, 20.0, 10.0 + w, 20.0 + h], "{w}×{h} on the press itself {start:?}");
+                assert_eq!(px(&o, &d, [0.0, 0.0]), [11.0 - w, 21.0 - h, 11.0, 21.0], "{w}×{h} dragged up and left {start:?}");
+            }
+            let r = px(&o, &drag(true), [10.4, 20.6]);
+            assert_eq!([r[2] - r[0], r[3] - r[1]], [w, h], "{w}×{h} centred: {r:?}");
+        }
+        assert_eq!(px(&o, &drag(true), [10.4, 20.6]), [-22.0, 5.0, 42.0, 37.0], "64 × 32 centred on the press");
+        // ⌥ with a 1 × 1 size on the document's first pixel keeps that pixel, not the one before it
+        (o.marquee_width, o.marquee_height) = (1.0, 1.0);
+        assert_eq!(px(&o, &drag_at([0.0, 0.0], true), [0.0, 0.0]), [0.0, 0.0, 1.0, 1.0], "1 × 1 centred on the origin");
+        (o.marquee_width, o.marquee_height) = (10.0, 10.0);
+        assert_eq!(px(&o, &drag_at([0.0, 0.0], true), [0.0, 0.0]), [-5.0, -5.0, 5.0, 5.0], "10 × 10 centred on the origin");
+    }
+}
