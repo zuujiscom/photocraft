@@ -16,8 +16,9 @@ const BAND_BYTES: usize = 32 << 20;
 /// Decodes a flat image into a single-layer document; a TIFF with Photoshop layer data opens
 /// layered (see [`crate::tiff_layers`]).
 pub fn import_flat(name: &str, bytes: &[u8]) -> Result<ImportResult, IoError> {
-    // Detected once; every step below branches on it.
-    let format = codecs::detect(bytes);
+    // Detected once; every step below branches on it. Extension disambiguates headerless
+    // Photoshop Raw (`.raw`) from other payloads when magic sniffing is inconclusive.
+    let format = codecs::detect(bytes).or_else(|| codecs::from_extension(name));
     if format == Some(Format::Tiff) {
         return import_tiff_page(name, bytes, None);
     }

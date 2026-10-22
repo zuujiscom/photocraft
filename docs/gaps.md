@@ -245,12 +245,14 @@ what an agent can't finish alone.
 - **Missing:** JPEG Options dialog (FILE-215-19), Photoshop PDF read and its vector/text/multi-page
   write (FILE-215-10, #2541; a single flattened page now saves via Save As / Save a Copy / CLI,
   2026-10-11, #3401), AVIF read (#463) and default-build AVIF write, JPEG XL, JPEG 2000 (#1047),
-  Cineon write (read landed), DICOM, EPS/DCS, Pixar, IFF, WBMP, MPO/JPS, PICT, Scitex CT, Photoshop
-  Raw; layered TIFF extra alpha channels (FILE-215-7); spot plates (FILE-215-17); .atn, .asl,
+  Cineon write (read landed), DICOM, EPS/DCS, Pixar, IFF, WBMP, MPO/JPS, PICT, Scitex CT; layered TIFF extra alpha channels (FILE-215-7); spot plates (FILE-215-17); .atn, .asl,
   .shc, .csh presets (FILE-215-15); C2PA (#1050).
 - **Detail:** [`file-format-parity.md`](file-format-parity.md).
 - **Progress (2026-10-13):** Cineon (`.cin`) 10-bit gray/RGB frames open read-only, sharing the
   DPX header/unpacking (`crates/codecs/src/codecs/dpx.rs`); writing is still open.
+- **Progress (2026-10-18):** Photoshop Raw (`.raw`) with a retained header opens as 8/16-bit
+  interleaved or planar gray/RGB/RGBA (`crates/codecs/src/codecs/photoshop_raw.rs`); headerless
+  streams and export are still open.
 - **Estimate:** 120–220 h.
 
 ## Hardware gaps

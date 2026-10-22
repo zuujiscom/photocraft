@@ -36,6 +36,8 @@ pub enum Format {
     Dpx,
     /// Kodak Cineon (`.cin`, the 10-bit film-scan format DPX grew from): read-only.
     Cineon,
+    /// Adobe Photoshop Raw (`.raw`): read-only when a retained header is present.
+    PhotoshopRaw,
 }
 
 /// What a format can hold **and** what this crate reads/writes for it.
@@ -89,6 +91,12 @@ pub const ASYMMETRIC_EXCEPTIONS: &[(Format, &str)] = &[
          writing needs an HEVC encoder, and the mature ones (x265, libheif) are C, so write stays \
          unsupported. Without the feature HEIF is detected but neither read nor written.",
     ),
+    (
+        Format::PhotoshopRaw,
+        "Photoshop Raw opens headerless streams only when the user supplies width, height and \
+         channels (File › Open). This crate reads the retained-header variant Photoshop writes \
+         on save; writing belongs in a dedicated export dialog, not Save As.",
+    ),
 ];
 
 use ChannelLayout as L;
@@ -101,7 +109,7 @@ const TIFF_LAYOUTS: &[ChannelLayout] = &[L::Gray, L::GrayA, L::Rgb, L::Rgba, L::
 
 impl Format {
     /// Every format known to the crate (enabled or not).
-    pub const ALL: [Format; 20] = [
+    pub const ALL: [Format; 21] = [
         Format::Png,
         Format::Jpeg,
         Format::Tiff,
@@ -122,6 +130,7 @@ impl Format {
         Format::Fits,
         Format::Dpx,
         Format::Cineon,
+        Format::PhotoshopRaw,
     ];
 
     pub fn caps(self) -> FormatCaps {
@@ -156,6 +165,7 @@ impl Format {
             Format::Fits => "FITS",
             Format::Dpx => "DPX",
             Format::Cineon => "Cineon",
+            Format::PhotoshopRaw => "Photoshop Raw",
         }
     }
 
@@ -183,6 +193,7 @@ impl Format {
             Format::Fits => &["fits", "fit", "fts"],
             Format::Dpx => &["dpx"],
             Format::Cineon => &["cin"],
+            Format::PhotoshopRaw => &["raw"],
         }
     }
 
@@ -208,6 +219,7 @@ impl Format {
             Format::Fits => "image/fits",
             Format::Dpx => "image/x-dpx",
             Format::Cineon => "image/x-cin",
+            Format::PhotoshopRaw => "image/x-photoshop-raw",
         }
     }
 
@@ -265,6 +277,9 @@ pub fn caps(format: Format) -> FormatCaps {
         // `text`: the DPX header fields only (see `fidelity_warnings_with`).
         Format::Dpx => FormatCaps { depths: &[S::U8, S::U16], layouts: &[L::Gray, L::Rgb, L::Rgba], text: true, ..base },
         Format::Cineon => FormatCaps { read: true, write: false, depths: &[S::U16], layouts: &[L::Gray, L::Rgb], alpha: false, ..base },
+        Format::PhotoshopRaw => {
+            FormatCaps { read: true, write: false, depths: &[S::U8, S::U16], layouts: &[L::Gray, L::GrayA, L::Rgb, L::Rgba], alpha: true, ..base }
+        }
     }
 }
 
@@ -330,6 +345,9 @@ pub fn detect(bytes: &[u8]) -> Option<Format> {
     }
     if crate::codecs::pcx::looks_like_pcx(b) {
         return Some(Format::Pcx);
+    }
+    if crate::codecs::photoshop_raw::looks_like(b) {
+        return Some(Format::PhotoshopRaw);
     }
     if looks_like_tga(b) {
         return Some(Format::Tga);

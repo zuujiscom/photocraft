@@ -52,7 +52,7 @@ XL are missing (gap G10). Remaining: 300–500 h including PSD fidelity.
 | MPO / JPS (stereo) | R/W | no | no | |
 | PICT | R | no | no | Legacy |
 | Scitex CT | R/W | no | no | Legacy |
-| Photoshop Raw (.raw) | R/W | no | no | |
+| Photoshop Raw (.raw) | R/W | partial | no | Retained-header 8/16-bit gray/RGB/RGBA opens; headerless streams and write still need File › Open / export options |
 | Camera raw (via Camera Raw 18.7) | R | partial | – | See below |
 
 ## Camera raw
