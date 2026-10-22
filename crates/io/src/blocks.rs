@@ -577,7 +577,30 @@ pub fn parse_placed_warp(key: &[u8; 4], data: &[u8]) -> Option<photocraft_geom::
     }
     let d = data.get(8..).and_then(parse_prefix_versioned)?;
     // A split (quilt) warp is stored under `quiltWarp`; `warp` then holds no usable mesh.
-    warp_of(get_desc(&d, "quiltWarp").or_else(|| get_desc(&d, "warp"))?).flatten()
+    let warp = warp_of(get_desc(&d, "quiltWarp").or_else(|| get_desc(&d, "warp"))?).flatten()?;
+    Some(match source_size(&d) {
+        Some(size) => over_source(warp, size),
+        None => warp,
+    })
+}
+
+/// The source size (`Sz  `) of a `SoLd` / `SoLE` descriptor; `None` when absent, empty or not
+/// finite.
+fn source_size(d: &Descriptor) -> Option<(f64, f64)> {
+    let sz = get_desc(d, "Sz  ")?;
+    let (w, h) = (num(sz.get("Wdth"))?, num(sz.get("Hght"))?);
+    (w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0).then_some((w, h))
+}
+
+/// A placed layer's custom warp as Photoshop draws it: the mesh spans the source rect
+/// `0..w × 0..h`, whatever box the file's `bounds` give (#8227). `bounds` only frames the
+/// control points; reading the source through it shifts the contents by its offset on a
+/// re-render. Other styles are built from their box and keep it.
+pub(crate) fn over_source(mut warp: photocraft_geom::warp::Warp, (w, h): (f64, f64)) -> photocraft_geom::warp::Warp {
+    if warp.style == photocraft_geom::warp::WarpStyle::Custom {
+        warp.bounds = [0.0, 0.0, w, h];
+    }
+    warp
 }
 
 /// A `warp` or `quiltWarp` descriptor (the `SoLd` key, or the whole descriptor after a `PlLd`
@@ -1100,6 +1123,45 @@ mod tests {
         assert_eq!(w.style, WarpStyle::Custom);
         assert_eq!(w.mesh.as_ref().unwrap().points[15], [67.0, 30.0]);
         assert!(parse_placed_warp(b"PlLd", &[0; 20]).is_none());
+    }
+
+    /// #8227: a custom warp whose `bounds` sit off the source rect (Photoshop wrote -425, -675 to
+    /// 2425, 2175 over a 2850 × 2850 source) still spans the source: its corners land on the
+    /// mesh's corner points. Read through `bounds`, the contents started 15 % / 24 % into the
+    /// mesh, and a re-render showed them shifted with their far edges cut off.
+    #[test]
+    fn offset_custom_warp_bounds_still_span_the_source() {
+        use photocraft_psd::descriptor::ObjectArray;
+        let e = |t: &str, v: &str| Value::Enumerated { type_id: Id::new(t), value: Id::new(v) };
+        let px = |v: f64| Value::UnitFloat { unit: *b"#Pxl", value: v };
+        let bounds = Descriptor::new("Rctn").with("Top ", px(-675.0)).with("Left", px(-425.0)).with("Btom", px(2175.0)).with("Rght", px(2425.0));
+        // An identity grid over the bounds, bent: the inner points pulled, one corner moved.
+        let (mut xs, mut ys) = (Vec::new(), Vec::new());
+        for j in 0..4 {
+            for i in 0..4 {
+                let inner = (1..3).contains(&i) && (1..3).contains(&j);
+                xs.push(-425.0 + f64::from(i) * 950.0 + if inner { 180.0 } else { 0.0 } - if i == 0 && j == 0 { 258.2 } else { 0.0 });
+                ys.push(-675.0 + f64::from(j) * 950.0 - if inner { 120.0 } else { 0.0 } - if i == 0 && j == 0 { 237.6 } else { 0.0 });
+            }
+        }
+        let mesh = Descriptor::new("null")
+            .with("Hrzn", Value::UnitFloats { unit: *b"#Pxl", values: xs.clone() })
+            .with("Vrtc", Value::UnitFloats { unit: *b"#Pxl", values: ys.clone() });
+        let warp = Descriptor::new("warp").with("warpStyle", e("warpStyle", "warpCustom")).with("bounds", Value::Descriptor(bounds)).with(
+            "customEnvelopeWarp",
+            Value::Descriptor(Descriptor::new("customEnvelopeWarp").with("meshPoints", Value::ObjectArray(ObjectArray { prefix: 16, body: mesh }))),
+        );
+        let size = Descriptor::new("Pnt ").with("Wdth", Value::Double(2850.0)).with("Hght", Value::Double(2850.0));
+        let d = Descriptor::new("null").with("Sz  ", Value::Descriptor(size)).with("warp", Value::Descriptor(warp));
+        let mut sold = b"soLD".to_vec();
+        sold.extend_from_slice(&4u32.to_be_bytes());
+        sold.extend(VersionedDescriptor::new(d).to_bytes());
+        let w = parse_placed_warp(b"SoLd", &sold).expect("a custom warp");
+        assert_eq!(w.bounds, [0.0, 0.0, 2850.0, 2850.0]);
+        for (x, y, k) in [(0.0, 0.0, 0), (2850.0, 0.0, 3), (0.0, 2850.0, 12), (2850.0, 2850.0, 15)] {
+            let (u, v) = w.map(x, y);
+            assert!((u - xs[k]).abs() < 1e-9 && (v - ys[k]).abs() < 1e-9, "source ({x}, {y}) at ({u}, {v}), mesh corner ({}, {})", xs[k], ys[k]);
+        }
     }
 
     #[test]

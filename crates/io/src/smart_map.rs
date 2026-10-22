@@ -1399,7 +1399,10 @@ fn pad4(mut v: Vec<u8>) -> Vec<u8> {
 /// the placed id (for a duplicate), transform (when it moved), warp and filter stack are rewritten;
 /// otherwise a fresh descriptor in Photoshop's key order. A split warp goes in `quiltWarp`.
 pub fn sold_bytes(template: Option<&Descriptor>, s: &PlacedSpec<'_>, warnings: &mut Vec<String>) -> Vec<u8> {
-    let stored = sold_warp(s.warp, warnings);
+    // A placed layer's custom mesh spans the source rect (#8227): one over another box (a warp
+    // made here) is re-expressed over it, which draws the same.
+    let source = s.warp.map(|w| w.over_box([0.0, 0.0, s.size.0, s.size.1]));
+    let stored = sold_warp(source.as_ref(), warnings);
     let warp = warp_desc(stored, s.size, warnings);
     let split = stored.zip(split_mesh(stored));
     let d = match template {
@@ -1412,12 +1415,17 @@ pub fn sold_bytes(template: Option<&Descriptor>, s: &PlacedSpec<'_>, warnings: &
                 set(&mut d, "Trnf", quad(s, stored));
                 set(&mut d, "nonAffineTransform", quad(s, stored));
             }
-            set(&mut d, "warp", warp);
+            // An imported warp is read over the source rect (#8227): one that reads back as the
+            // layer's warp is kept as the file has it, its own `bounds` and all.
+            let read = |q: &Descriptor| crate::blocks::warp_of(q).map(|w| w.map(|w| crate::blocks::over_source(w, s.size)));
+            if get_desc(t, "warp").and_then(read).is_none_or(|w| w.as_ref() != stored) {
+                set(&mut d, "warp", warp);
+            }
             // `quiltWarp` is read before `warp`, so the imported one stays only while it still
             // says what the layer's warp is (unchanged, or unreadable while the layer has none);
             // otherwise it is rewritten, or dropped for a warp that isn't split.
             let old = get_desc(t, "quiltWarp");
-            let kept = old.is_some_and(|q| match crate::blocks::warp_of(q) {
+            let kept = old.is_some_and(|q| match read(q) {
                 Some(w) => w.as_ref() == stored,
                 None => s.warp.is_none(),
             });
@@ -3385,6 +3393,41 @@ mod tests {
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(crate::blocks::parse_smart(b"SoLd", &sold).1, transform);
         assert_eq!(crate::blocks::parse_placed_warp(b"SoLd", &sold), Some(warp));
+    }
+
+    /// #8227: a placed layer's custom mesh spans the source rect. One made here over a box past
+    /// the source is written over the source rect and reads back drawing the same, placed where
+    /// it was; an imported one whose `bounds` sit elsewhere reads the same and is written back
+    /// as the file has it.
+    #[test]
+    fn custom_warp_bounds_off_the_source_round_trip() {
+        use photocraft_geom::warp::BezierMesh;
+        let transform = Affine { m: [2.0, 0.0, 0.0, 2.0, 120.0, 210.0] };
+        let b = [-4.0, -3.0, 56.0, 27.0];
+        let mut m = BezierMesh::identity(b, 1, 1);
+        m.points[5] = [14.0, 1.0];
+        m.points[15] = [60.0, 31.0];
+        let made = Warp::custom(m, b);
+        let sold = sold_bytes(None, &placed(transform, Some(&made)), &mut Vec::new());
+        let back = crate::blocks::parse_placed_warp(b"SoLd", &sold).expect("the warp");
+        assert_eq!(back.bounds, [0.0, 0.0, 50.0, 25.0]);
+        for (x, y) in [(0.0, 0.0), (50.0, 25.0), (12.5, 20.0), (31.0, 4.0), (50.0, 0.0)] {
+            let (p, q) = (back.map(x, y), made.map(x, y));
+            assert!((p.0 - q.0).abs() < 1e-6 && (p.1 - q.1).abs() < 1e-6, "({x}, {y}): {p:?} vs {q:?}");
+        }
+        let t = crate::blocks::parse_smart(b"SoLd", &sold).1;
+        assert!(t.m.iter().zip(transform.m).all(|(a, b)| (a - b).abs() < 1e-9), "placed where it was: {t:?}");
+        // The same mesh with `bounds` off the source, as Photoshop may write it.
+        let mut template = sold_descriptor(&sold).expect("a descriptor");
+        let Some((_, Value::Descriptor(w))) = template.items.iter_mut().find(|(k, _)| k.is("warp")) else { panic!("a warp") };
+        let Some((_, Value::Descriptor(bx))) = w.items.iter_mut().find(|(k, _)| k.is("bounds")) else { panic!("its bounds") };
+        for (k, v) in [("Left", -5.0), ("Top ", -2.0), ("Rght", 45.0), ("Btom", 23.0)] {
+            set(bx, k, Value::Double(v));
+        }
+        let read = crate::blocks::parse_placed_warp(b"SoLd", &sold_of(template.clone())).expect("the warp");
+        assert_eq!(read, back, "bounds don't move the contents");
+        let again = sold_bytes(Some(&template), &placed(transform, Some(&read)), &mut Vec::new());
+        assert_eq!(get_desc(&sold_descriptor(&again).expect("a descriptor"), "warp"), get_desc(&template, "warp"));
     }
 
     /// A split (multi-patch) custom warp is written as Photoshop writes it, a `quiltWarp` before a
